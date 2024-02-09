@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/ZeeeUs/Go-gin-boilerplate/internal/config"
@@ -21,7 +22,11 @@ func main() {
 	}
 	logger := cfg.Logger()
 
-	pgConn, err := pgxpool.NewWithConfig(context.Background(), cfg.PgxConnConfig())
+	ctx := context.Background()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+	pgConn, err := pgxpool.NewWithConfig(ctx, cfg.PgxConnConfig())
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to connect to database")
 	}
@@ -35,7 +40,16 @@ func main() {
 		srv.Run()
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	<-quit
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		logger.Info().Msg("shutdown...")
+		srv.Shutdown(ctx)
+	}()
+
+	wg.Wait()
 }
